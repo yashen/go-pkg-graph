@@ -6,6 +6,7 @@ import (
 	"github.com/gogf/gf/v2/text/gregex"
 	cli "github.com/jawher/mow.cli"
 	"github.com/samber/lo"
+	"github.com/yashen/go-pkg-graph/internal"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -22,8 +23,10 @@ type _Dep struct {
 	DepNames []string
 }
 
-var outputFile string
-var depth int
+var optOutputFile string
+var optDepth int
+var optIncludePrefix []string
+var optExcludePrefix []string
 
 func Main() {
 	if len(os.Args) == 2 && os.Args[1] == "install" {
@@ -38,10 +41,13 @@ func Main() {
 	}
 
 	cliApp := cli.App("go-pkg-graph", "gen package depend graph")
-	cliApp.StringOptPtr(&outputFile, "o output", "graph.svg", "output svg file")
-	cliApp.IntOptPtr(&depth, "d depth", 3, "package depth")
+	cliApp.StringOptPtr(&optOutputFile, "o output", "graph.svg", "output svg file")
+	cliApp.StringsOptPtr(&optIncludePrefix, "i include", nil, "package include prefix")
+	cliApp.StringsOptPtr(&optExcludePrefix, "e exclude", nil, "package exclude prefix")
+	cliApp.IntOptPtr(&optDepth, "d depth", 3, "package depth")
 	modulePathOpt := cliApp.StringOpt("m module", ".", "module path")
 	cliApp.Action = func() {
+
 		modulePath, err := filepath.Abs(*modulePathOpt)
 		if err != nil {
 			panic(err)
@@ -110,16 +116,36 @@ func genImage(moduleName string, depList []_Dep) {
 	for i, _ := range arrayList {
 		item := arrayList[i]
 		leftParts := strings.Split(item[0], "/")
-		if len(leftParts) > depth {
-			leftParts = leftParts[:depth]
+		if len(leftParts) > optDepth {
+			leftParts = leftParts[:optDepth]
 		}
 		rightParts := strings.Split(item[1], "/")
-		if len(rightParts) > depth {
-			rightParts = rightParts[:depth]
+		if len(rightParts) > optDepth {
+			rightParts = rightParts[:optDepth]
 		}
 		item = [2]string{strings.Join(leftParts, "/"), strings.Join(rightParts, "/")}
 		arrayList[i] = item
 
+	}
+
+	if len(optExcludePrefix) > 0 {
+		arrayList = lo.Filter(arrayList, func(item [2]string, index int) bool {
+			return !internal.Any(item[0:], func(item string) bool {
+				return internal.Any(optExcludePrefix, func(prefix string) bool {
+					return strings.HasPrefix(item, prefix)
+				})
+			})
+		})
+	}
+
+	if len(optIncludePrefix) > 0 {
+		arrayList = lo.Filter(arrayList, func(item [2]string, index int) bool {
+			return internal.Both(item[0:], func(item string) bool {
+				return internal.Any(optIncludePrefix, func(prefix string) bool {
+					return strings.HasPrefix(item, prefix)
+				})
+			})
+		})
 	}
 
 	arrayList = lo.Filter(arrayList, func(item [2]string, index int) bool {
@@ -143,7 +169,7 @@ func genImage(moduleName string, depList []_Dep) {
 
 	content := buider.String()
 
-	if err := runDotToImageCallSystemGraphviz(outputFile, content); err != nil {
+	if err := runDotToImageCallSystemGraphviz(optOutputFile, content); err != nil {
 		panic(err)
 	}
 
